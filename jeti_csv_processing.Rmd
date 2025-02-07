@@ -1,0 +1,73 @@
+---
+title: "jeti_csv_processing"
+author: "Carolina Guidolin"
+date: "2025-02-07"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Processing of csv file obtained from JETI calibration 
+ Each csv file is saved with following columns:
+ - pc_name
+ - eye
+ - repetition, 
+ - intensity
+ - measurement_time,
+ - spectrum
+ 
+ The last column, spectrum, contains a list of several values, which are the values of the spectrum measured by the spectrometer. The number of values in the spectrum column is the same for all rows in the csv file. 
+ 
+## Aim of thi script
+We need to re-format this csv file so that the values in the column spectrum can actually be used for further analysis. The idea is to create a new csv file where each row corresponds to a single value in the spectrum column. The new csv file will have the following columns:
+- pc_name
+- eye
+- repetition, 
+- intensity
+- measurement_time,
+- spectral irradiance
+Where spectral irradiance is a single value extracted from spectrum, corresponding to a specific wavelength 
+
+```{r}
+## Ensure the directory is set correctly first!
+
+library(tidyverse)
+# Load the CSV file 
+cali_df_raw <- read_csv("RGMS-VR02_left_20250205T162306.csv")
+
+# Process the spectrum column
+cali_df_clean <- cali_df_raw %>%
+  mutate(spectrum = str_remove_all(spectrum, "\\[|\\]")) %>%  # Remove brackets
+  separate_rows(spectrum, sep = " ") %>%  # Expand into multiple rows
+  mutate(spectrum = as.numeric(spectrum)) %>%  # Convert to numeric
+  rename(spectral_irradiance = spectrum) %>% # Rename for clarity
+  select(pc_name, eye, repetition, intensity, measurement_time, spectral_irradiance)  # Reorder columns and eliminate first one
+
+# We do not have a column for wavelength, which we need to use the spectran software
+cali_df_clean <- cali_df_clean %>%
+  group_by(intensity) %>%
+  mutate(wavelength = seq(from = 380, to = 780)) %>%  # Create a wavelength column from 380 to 780 at 1nm steps
+  ungroup()
+
+```
+## Save outputs in different csv according to intensity
+```{r}
+# Get unique intensity values
+intensities <- base::unique(cali_df_clean$intensity)
+
+# Output folder
+output_folder <- "H:/shine/code/experimental/calibration/results/processed/"
+
+# Save separate CSV files for each intensity level
+for (int in intensities) {
+  df_filtered <- cali_df_clean %>% filter(intensity == int)  # Filter by intensity
+  file_name <- paste0(output_folder, "intensity_", int, ".csv")  # Create filename
+  # Save file
+  write_csv(df_filtered,
+            file_name)  
+}
+
+```
+
