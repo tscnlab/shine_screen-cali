@@ -1,0 +1,311 @@
+---
+title: "illuminance_calculation"
+author: "Carolina Guidolin"
+date: "2025-03-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Calculation of illuminance levels for each VR input intensity
+
+Intensities from VR span from 0 to 1, and we are interested in measuring the illuminance received at the eye level at these different input intensities.
+
+### Importing files
+
+```{r}
+# Upload necessary packages 
+library(tidyverse)
+
+# Setting working directory
+setwd(here::here("results")) # specify which folder in the WD the files are to be found 
+
+# Import files (csv) all in one df
+raw_data <- list.files(pattern = "\\.csv$") %>%
+  purrr::map_df(~read_csv(.))
+```
+
+### Data wrangling
+
+When we collected the data (i.e performed the calibration), we only added VR_number after we started the calibration already, meaning that not all files saved contain this variable. We decided to include this variable because we tested 5 VR headsets on only 3 computer, hence using the computer name to extract the VR headset was not sufficient.
+
+```{r}
+# Identify missing VR numbers
+vr_na <- raw_data %>%
+  filter(is.na(VR_number)) # corresponds to PC name RGMS-VR02
+
+# Check that VR_number = 2 does not in fact exist
+vr_two <- raw_data %>%
+  filter(VR_number == 2)
+
+# Replace missing values 
+data1 <- raw_data %>%
+  mutate(VR_number = if_else(PC_name == "RGMS-VR02" & is.na(VR_number),
+                             2, VR_number
+                             )
+         )
+
+# Check no NAs left
+data1 %>% filter(is.na(VR_number)) # correct, no NA values left 
+```
+
+### Now we want to calculate the average illuminance for the left and right eye for each VR headset
+
+We calculate descriptive statistics for each VR headset, for each eye, across the various repetitions of the same input intensity
+
+```{r}
+# Removing scientific notation
+options(scipen=999)
+
+# Create a for loop to obtain 5 different dfs called vr_[name of vr]
+vr_numbers <- c(1,2,3,4,5)
+
+for (vr in vr_numbers) {
+  assign(paste0("vr_", vr),
+         data1 %>%
+         filter(VR_number == vr) %>%
+         group_by(eye, input_intensity) %>% 
+         summarise(
+           mean_photopic = mean(illuminance_lux),
+           sd_photopic = sd(illuminance_lux),
+           mean_medi = mean(a_opic_iprgc),
+           sd_medi = sd(a_opic_iprgc),
+           median_photopic = median(illuminance_lux),
+           median_medi = median(a_opic_iprgc)
+         ) %>%
+         ungroup() %>%
+         mutate(vr = paste0(vr)) # add extra col to label the vr 
+  )
+}
+
+```
+
+### Comparison across VR headset
+
+In the last step, we calculated the mean across repetitions for each input intensity. In this step, we compare these values across VR headsets. We are particularly interested in the intensities 0 and 0.5, because these are the intensities for the dark and bright light condition. So we will select these.
+
+```{r}
+# Combine dfs into one
+vr_combined <- rbind(vr_1, vr_2, vr_3, vr_4, vr_5)
+
+#Df with only dark condition (input intensity = 0)
+int0_all <- vr_combined %>%
+  filter(input_intensity == 0.0)
+  
+# Summary stats for the 10 measurements of darkness   
+int0_summary <- int0_all %>%
+  filter(input_intensity == 0.0) %>%
+  summarise(mean = mean(mean_medi),
+            sd = sd(sd_medi),
+            max = max(mean_medi),
+            min = min(mean_medi),
+            range = max - min,
+            ) %>%
+  ungroup()
+
+#Df with bright light condition (input intesity=0.5)
+int50_all <- vr_combined %>%
+  filter(input_intensity == 0.5)
+
+#Summary stats for the 10 bright light measurements
+int50_summary <- int50_all %>%
+  summarise(mean = mean(mean_medi),
+            sd = sd(sd_medi),
+            max = max(mean_medi),
+            min = min(mean_medi),
+            range = max - min,
+            ) %>%
+  ungroup()
+
+```
+
+### Turning these into tables for registered report
+
+We now want to create tables to be inserted in the registered report, for both the dark and the bright conditions.
+
+#### Dark condition table
+
+```{r}
+# First, we need to convert to wide format for nicer visualisation of left/right eye, and combine mean and SD info in one cell 
+int0_wide <- int0_all %>%
+  select(-c(input_intensity, median_photopic, median_medi)) %>%
+  pivot_wider(
+    names_from = eye, 
+    values_from = c(mean_photopic, sd_photopic, mean_medi, sd_medi)
+  ) %>%
+  mutate(photopic_left = paste0(round(mean_photopic_left, 3), "±", round(sd_photopic_left, 3)),
+         photopic_right = paste0(round(mean_photopic_right, 3), "±", round(sd_photopic_right, 3)),
+         medi_left = paste0(round(mean_medi_left, 3), "±", round(sd_medi_left, 3)),
+         medi_right = paste0(round(mean_medi_right, 3), "±", round(sd_medi_right, 3))
+  ) %>%
+  # Select only cols that are relevant (combined mean and SD)
+  select(vr, photopic_left, photopic_right, medi_left, medi_right)
+
+# Use gt package to create a table
+table_dark <- int0_wide %>%
+   gt::gt() %>%
+  
+  # Merge headers for photopic illuminance and Melanopic EDI
+  gt::tab_spanner(
+    label = "Photopic illuminance [lux] (mean±1SD)",
+    columns = c(photopic_left, photopic_right)
+  ) %>%
+  gt::tab_spanner(
+    label = "Melanopic EDI [lux] (mean±1SD)",
+    columns = c(medi_left, medi_right)
+  ) %>%
+  
+  #Center-align the text in each cell
+  gt::cols_align(align = "center",
+                 columns = dplyr::everything()) %>%
+  
+  # Rename columns for clarity 
+  gt::cols_label(
+    vr = "VR",
+    photopic_left = "Left eye",
+    photopic_right = "Right eye",
+    medi_left = "Left eye",
+    medi_right = "Right eye"
+  ) %>%
+  
+  # Add title
+  gt:: tab_header(title = gt::md("**Stimulus properties for dark condition (<0.01 lx)**"))
+
+table_dark
+  
+```
+
+#### Bright condition table
+
+We now do the same for the bright condition table.
+
+```{r}
+# As before, we first need to convert to wide format for nicer visualisation of left/right eye, and combine mean and SD info in one cell 
+int50_wide <- int50_all %>%
+  select(-c(input_intensity, median_photopic, median_medi)) %>%
+  pivot_wider(
+    names_from = eye, 
+    values_from = c(mean_photopic, sd_photopic, mean_medi, sd_medi)
+  ) %>%
+  mutate(photopic_left = paste0(round(mean_photopic_left, 2), "±", round(sd_photopic_left, 2)),
+         photopic_right = paste0(round(mean_photopic_right, 2), "±", round(sd_photopic_right, 2)),
+         medi_left = paste0(round(mean_medi_left, 2), "±", round(sd_medi_left, 2)),
+         medi_right = paste0(round(mean_medi_right, 2), "±", round(sd_medi_right, 2))
+  ) %>%
+  # Select only cols that are relevant (combined mean and SD)
+  select(vr, photopic_left, photopic_right, medi_left, medi_right)
+
+# Use gt package to create a table
+table_bright <- int50_wide %>%
+   gt::gt() %>%
+  
+  # Merge headers for photopic illuminance and Melanopic EDI
+  gt::tab_spanner(
+    label = "Photopic illuminance [lux] (mean±1SD)",
+    columns = c(photopic_left, photopic_right)
+  ) %>%
+  gt::tab_spanner(
+    label = "Melanopic EDI [lux] (mean±1SD)",
+    columns = c(medi_left, medi_right)
+  ) %>%
+  
+  #Center-align the text in each cell
+  gt::cols_align(align = "center",
+                 columns = dplyr::everything()) %>%
+  
+  # Rename columns for clarity 
+  gt::cols_label(
+    vr = "VR",
+    photopic_left = "Left eye",
+    photopic_right = "Right eye",
+    medi_left = "Left eye",
+    medi_right = "Right eye"
+  ) %>%
+  
+  # Add title
+  gt:: tab_header(title = gt::md("**Stimulus properties for bright condition (~100 lx)**"))
+
+table_bright
+  
+```
+
+#### Saving both tables
+
+```{r}
+# Load chromote, needed to save using gt
+library(chromote)
+
+# Make sure you set your path to Chrome using Sys.setenv(CHROMOTE_CHROME = "path/to/chrome.exe") and check this was correct by running chromote::find_chrome()
+
+# Also, make sure to have a folder called "results"!
+## The following line ensures that such folder exists
+main_dir <-  here::here("results")
+if (!dir.exists(main_dir)) dir.create(main_dir, recursive = TRUE)
+
+# Dark condition table
+gt::gtsave(table_dark,
+           filename = "vr_cali_dark.png",
+           path = main_dir,
+           vheight = 300, 
+           vwidth = 700,
+           expand = 15)
+
+# Bright condition table
+gt::gtsave(table_bright,
+           filename = "vr_cali_bright.png",
+           path = main_dir,
+           vheight = 300, 
+           vwidth = 700,
+           expand = 15)
+```
+
+#### Alternative visualisation
+
+An alternative to creating two tables is to just create a single table combining both the dark and bright conditions. It's not so easy to stack gt tables, because there is no function in the package to do so. But we borrow a function from [Andrew Weatherman's GitHub repository](https://gist.github.com/andreweatherman/cc17d9b42f922abf8ccaffae0fef0f71).
+
+```{r}
+# helper function to stack tables
+stack_gt_tables <- function (tables = NULL, output = "viewer", filename = NULL,
+                             path = NULL, vwidth = 600, vheight = 1000, ..., zoom = 2
+                          )
+{
+  # divs for each table // change style from gt_two_column_layout
+  stacked_tables <- htmltools::div(
+    htmltools::div(tables[[1]], style = "display: block; width: 100%;"),
+    htmltools::div(tables[[2]], style = "display: block; width: 100%;")
+  )
+
+  # carry rest of gt_two_column_layout
+  if (output == "viewer") {
+    htmltools::browsable(stacked_tables)
+  }
+  else if (output == "save") {
+
+    filename <- if (is.null(filename)) tempfile(fileext = ".png") else filename
+    filename <- if (is.null(path)) filename else file.path(path, filename)
+
+    tempfile_ <- tempfile(fileext = ".html")
+    htmltools::save_html(html = stacked_tables, file = tempfile_)
+
+    webshot2::webshot(url = paste0("file:///", tempfile_),
+                      file = filename, vwidth = vwidth, vheight = vheight, zoom = zoom, ...)
+
+  }
+  else if (output == "html") {
+    stacked_tables
+  }
+}
+
+# stack_gt_tables(list(table1, table2), output = 'save', file = 'test.png')
+```
+
+Now we use this to stack our two tables. Note that from the original function, we slightly changed the vheight and vwidth parameters to fit the current table. We also deleted the zoom and expand parameters
+```{r}
+dark_bright_combi <- stack_gt_tables(list(table_dark, table_bright),
+                                     output = 'save', 
+                                     file = 'dark_bright_combined.png',
+                                     path = main_dir)
+```
+
