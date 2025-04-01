@@ -125,8 +125,7 @@ int50_summary <- int50_all %>%
 
 We now want to create tables to be inserted in the registered report, for both the dark and the bright conditions.
 
-#### Dark condition table
-
+#### Dark condition df processing
 ```{r}
 # First, we need to convert to wide format for nicer visualisation of left/right eye, and combine mean and SD info in one cell 
 int0_wide <- int0_all %>%
@@ -135,16 +134,55 @@ int0_wide <- int0_all %>%
     names_from = eye, 
     values_from = c(mean_photopic, sd_photopic, mean_medi, sd_medi)
   ) %>%
+  
+  # Format cols so that one cell contains mean and sd 
   mutate(photopic_left = paste0(round(mean_photopic_left, 3), "±", round(sd_photopic_left, 3)),
          photopic_right = paste0(round(mean_photopic_right, 3), "±", round(sd_photopic_right, 3)),
          medi_left = paste0(round(mean_medi_left, 3), "±", round(sd_medi_left, 3)),
          medi_right = paste0(round(mean_medi_right, 3), "±", round(sd_medi_right, 3))
   ) %>%
-  # Select only cols that are relevant (combined mean and SD)
-  select(vr, photopic_left, photopic_right, medi_left, medi_right)
+    # Now, we need to calculate the mean of the average and mean of SD for each VR headset (mean for each row). We do this by adding
+    # a new col to the df
+    mutate(avg_mean_phot_headset = rowMeans(select(., mean_photopic_left, mean_photopic_right),
+                                           na.rm = TRUE),
+           avg_mean_medi_headset = rowMeans(select(., mean_medi_left, mean_medi_right),
+                                           na.rm = TRUE),
+           avg_sd_phot_headset = rowMeans(select(., sd_photopic_left, sd_photopic_right),
+                                         na.rm = TRUE),
+           avg_sd_medi_headset= rowMeans(select(., sd_medi_left, sd_medi_right),
+                                         na.rm = TRUE),
+           avg_phot_headset = paste0(round(avg_mean_phot_headset, 3), "±", round(avg_sd_phot_headset, 3)),
+           avg_medi_headset = paste0(round(avg_mean_medi_headset, 3), "±", round(avg_sd_medi_headset, 3))
+  ) 
+ # Select only cols that are relevant (combined mean and SD)
+int0_wide_clean <- int0_wide %>% 
+                   select(vr, photopic_left, photopic_right, medi_left, medi_right, avg_phot_headset, avg_medi_headset) 
+  
+# Now, we need to calculate the mean of the average and mean of SD across VR headsets, i.e. mean of average and mean of SD for each columns. We do this by adding a final row to the df. This is not so easy as adding a column (using mutate()), so we need to create an additional 1-row df for this
+summary_row_0 <- int0_wide %>%
+  summarize(
+    vr = "Inter-VR averages (mean±1SD)",
+    photopic_left = paste0(round(mean(mean_photopic_left, na.rm = TRUE), 3), "±", round(mean(sd_photopic_left, na.rm = TRUE), 3)),
+    photopic_right = paste0(round(mean(mean_photopic_right, na.rm = TRUE), 3), "±", round(mean(sd_photopic_right, na.rm = TRUE), 3)),
+    medi_left = paste0(round(mean(mean_medi_left, na.rm = TRUE), 3), "±", round(mean(sd_medi_left, na.rm = TRUE), 3)),
+    medi_right = paste0(round(mean(mean_medi_right, na.rm = TRUE), 3), "±", round(mean(sd_medi_right, na.rm = TRUE), 3)),
+  )
 
+# Append the summary row to the clean dataset
+int0_wide_all <- bind_rows(int0_wide_clean, summary_row_0) 
+
+#Replace NA values with empty strings
+int0_wide_all <- replace(int0_wide_all, is.na(int0_wide_all), "")
+
+
+```
+
+Now we create a gt table
+```{r}
+
+  
 # Use gt package to create a table
-table_dark <- int0_wide %>%
+table_dark <- int0_wide_all %>%
    gt::gt() %>%
   
   # Merge headers for photopic illuminance and Melanopic EDI
@@ -155,6 +193,10 @@ table_dark <- int0_wide %>%
   gt::tab_spanner(
     label = "Melanopic EDI [lux] (mean±1SD)",
     columns = c(medi_left, medi_right)
+  ) %>%
+  gt::tab_spanner(
+    label= "Intra-VR headset averages (mean±1SD)",
+    columns=(c(avg_phot_headset, avg_medi_headset))
   ) %>%
   
   #Center-align the text in each cell
@@ -167,8 +209,43 @@ table_dark <- int0_wide %>%
     photopic_left = "Left eye",
     photopic_right = "Right eye",
     medi_left = "Left eye",
-    medi_right = "Right eye"
+    medi_right = "Right eye",
+    avg_phot_headset = "Photopic illuminance",
+    avg_medi_headset = "Melanopic EDI"
   ) %>%
+  
+  # Adding row separator
+  gt::tab_style(
+    #Row separator format
+    style = list(
+      cell_borders(
+        sides = "bottom",
+        color = "grey",
+        weight = px(2)
+      )
+    ),
+      locations = list(
+        #Location of row separator
+        cells_body(
+          columns = c(photopic_left, photopic_right, medi_left, medi_right),
+          rows = 5)
+      )) %>%
+  
+    # Adding col separator
+  gt::tab_style(
+    #Col separator format
+    style = list(
+      cell_borders(
+        sides = "right",
+        color = "grey",
+        weight = px(2)
+      )
+    ),
+      locations = list(
+        #Location of col separator
+        cells_body(
+          columns = c(medi_right))
+      )) %>%
   
   # Add title
   gt:: tab_header(title = gt::md("**Stimulus properties for dark condition (<0.01 lx)**"))
@@ -194,11 +271,46 @@ int50_wide <- int50_all %>%
          medi_left = paste0(round(mean_medi_left, 2), "±", round(sd_medi_left, 2)),
          medi_right = paste0(round(mean_medi_right, 2), "±", round(sd_medi_right, 2))
   ) %>%
-  # Select only cols that are relevant (combined mean and SD)
-  select(vr, photopic_left, photopic_right, medi_left, medi_right)
+    # Now, we need to calculate the mean of the average and mean of SD for each VR headset (mean for each row). We do this by adding
+    # a new col to the df
+    mutate(avg_mean_phot_headset = rowMeans(select(., mean_photopic_left, mean_photopic_right),
+                                           na.rm = TRUE),
+           avg_mean_medi_headset = rowMeans(select(., mean_medi_left, mean_medi_right),
+                                           na.rm = TRUE),
+           avg_sd_phot_headset = rowMeans(select(., sd_photopic_left, sd_photopic_right),
+                                         na.rm = TRUE),
+           avg_sd_medi_headset= rowMeans(select(., sd_medi_left, sd_medi_right),
+                                         na.rm = TRUE),
+           avg_phot_headset = paste0(round(avg_mean_phot_headset, 2), "±", round(avg_sd_phot_headset, 2)),
+           avg_medi_headset = paste0(round(avg_mean_medi_headset, 2), "±", round(avg_sd_medi_headset, 2))
+  ) 
+ # Select only cols that are relevant (combined mean and SD)
+int50_wide_clean <- int50_wide %>% 
+                   select(vr, photopic_left, photopic_right, medi_left, medi_right, avg_phot_headset, avg_medi_headset) 
+  
+# Now, we need to calculate the mean of the average and mean of SD across VR headsets, i.e. mean of average and mean of SD for each columns. We do this by adding a final row to the df. This is not so easy as adding a column (using mutate()), so we need to create an additional 1-row df for this
+summary_row_50 <- int50_wide %>%
+  summarize(
+    vr = "Inter-VR averages (mean±1SD)",
+    photopic_left = paste0(round(mean(mean_photopic_left, na.rm = TRUE), 2), "±", round(mean(sd_photopic_left, na.rm = TRUE), 2)),
+    photopic_right = paste0(round(mean(mean_photopic_right, na.rm = TRUE), 2), "±", round(mean(sd_photopic_right, na.rm = TRUE), 2)),
+    medi_left = paste0(round(mean(mean_medi_left, na.rm = TRUE), 2), "±", round(mean(sd_medi_left, na.rm = TRUE), 2)),
+    medi_right = paste0(round(mean(mean_medi_right, na.rm = TRUE), 2), "±", round(mean(sd_medi_right, na.rm = TRUE), 2)),
+  )
 
+# Append the summary row to the clean dataset
+int50_wide_all <- bind_rows(int50_wide_clean, summary_row_50)
+
+#Replace NA values with empty strings
+int50_wide_all <- replace(int50_wide_all, is.na(int50_wide_all), "")
+
+
+```
+
+Create gt table
+```{r}
 # Use gt package to create a table
-table_bright <- int50_wide %>%
+table_bright <- int50_wide_all %>%
    gt::gt() %>%
   
   # Merge headers for photopic illuminance and Melanopic EDI
@@ -209,6 +321,10 @@ table_bright <- int50_wide %>%
   gt::tab_spanner(
     label = "Melanopic EDI [lux] (mean±1SD)",
     columns = c(medi_left, medi_right)
+  ) %>%
+  gt::tab_spanner(
+    label= "Intra-VR headset averages (mean±1SD)",
+    columns=(c(avg_phot_headset, avg_medi_headset))
   ) %>%
   
   #Center-align the text in each cell
@@ -221,8 +337,43 @@ table_bright <- int50_wide %>%
     photopic_left = "Left eye",
     photopic_right = "Right eye",
     medi_left = "Left eye",
-    medi_right = "Right eye"
+    medi_right = "Right eye",
+    avg_phot_headset = "Photopic illuminance",
+    avg_medi_headset = "Melanopic EDI"
   ) %>%
+  
+  # Adding row separator
+  gt::tab_style(
+    #Row separator format
+    style = list(
+      cell_borders(
+        sides = "bottom",
+        color = "grey",
+        weight = px(2)
+      )
+    ),
+      locations = list(
+        #Location of row separator
+        cells_body(
+          columns = c(photopic_left, photopic_right, medi_left, medi_right),
+          rows = 5)
+      )) %>%
+  
+    # Adding col separator
+  gt::tab_style(
+    #Col separator format
+    style = list(
+      cell_borders(
+        sides = "right",
+        color = "grey",
+        weight = px(2)
+      )
+    ),
+      locations = list(
+        #Location of col separator
+        cells_body(
+          columns = c(medi_right))
+      )) %>%
   
   # Add title
   gt:: tab_header(title = gt::md("**Stimulus properties for bright condition (~100 lx)**"))
@@ -268,7 +419,7 @@ An alternative to creating two tables is to just create a single table combining
 ```{r}
 # helper function to stack tables
 stack_gt_tables <- function (tables = NULL, output = "viewer", filename = NULL,
-                             path = NULL, vwidth = 600, vheight = 1000, ..., zoom = 2
+                             path = NULL, vwidth = 1000, vheight = 1000, ..., zoom = 2
                           )
 {
   # divs for each table // change style from gt_two_column_layout
