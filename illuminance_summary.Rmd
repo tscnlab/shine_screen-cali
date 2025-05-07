@@ -18,6 +18,7 @@ Intensities from VR span from 0 to 1, and we are interested in measuring the ill
 ```{r}
 # Upload necessary packages 
 library(tidyverse)
+library(gt)
 
 # Setting working directory
 setwd(here::here("results")) # specify which folder in the WD the files are to be found 
@@ -125,7 +126,7 @@ int50_summary <- int50_all %>%
 
 We now want to create tables to be inserted in the registered report, for both the dark and the bright conditions.
 
-#### Dark condition df processing
+#### Dim light condition df processing
 ```{r}
 # First, we need to convert to wide format for nicer visualisation of left/right eye, and combine mean and SD info in one cell 
 int0_wide <- int0_all %>%
@@ -248,7 +249,7 @@ table_dark <- int0_wide_all %>%
       )) %>%
   
   # Add title
-  gt:: tab_header(title = gt::md("**Stimulus properties for dark condition (<0.01 lx)**"))
+  gt:: tab_header(title = gt::md("**Stimulus properties for dim light condition (<0.01 lx)**"))
 
 table_dark
   
@@ -376,7 +377,7 @@ table_bright <- int50_wide_all %>%
       )) %>%
   
   # Add title
-  gt:: tab_header(title = gt::md("**Stimulus properties for bright condition (~100 lx)**"))
+  gt:: tab_header(title = gt::md("**Stimulus properties for bright condition (~90 lx)**"))
 
 table_bright
   
@@ -397,7 +398,7 @@ if (!dir.exists(main_dir)) dir.create(main_dir, recursive = TRUE)
 
 # Dark condition table
 gt::gtsave(table_dark,
-           filename = "vr_cali_dark.png",
+           filename = "vr_cali_dim.png",
            path = main_dir,
            vheight = 300, 
            vwidth = 700,
